@@ -89,3 +89,8 @@ cache
 .vscode
 maps
 config.ini
+
+# Linux port: fetched/build dependencies and packaging output
+dist/
+third/leveldb-mcpe/
+compile_commands.json
