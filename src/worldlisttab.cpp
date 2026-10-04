@@ -269,6 +269,7 @@ void WorldListTab::setDiscoveredLevels(const std::vector<LevelPathInfo>& levels)
 void WorldListTab::rebuildRecentList() {
     recent_list_->clear();
     next_recent_idx_ = 0;
+    ++recent_generation_;
 
     if (recent_paths_.isEmpty()) {
         if (recent_header_) recent_header_->hide();
@@ -319,10 +320,20 @@ void WorldListTab::rebuildRecentList() {
 void WorldListTab::loadNextRecentInfo() {
     if (next_recent_idx_ >= recent_paths_.size()) return;
 
-    int idx = next_recent_idx_++;
+    const int idx = next_recent_idx_++;
+    const int generation = recent_generation_;
+    // Take a copy of the path on the GUI thread: the worker must never read
+    // recent_paths_ while setRecentPaths() can rebuild the list underneath it.
+    const QString path = recent_paths_.at(idx);
+
     auto watcher = new QFutureWatcher<LevelPathInfo>(this);
-    connect(watcher, &QFutureWatcher<LevelPathInfo>::finished, this, [this, watcher, idx]() {
+    connect(watcher, &QFutureWatcher<LevelPathInfo>::finished, this, [this, watcher, idx, generation]() {
         LevelPathInfo info = watcher->result();
+        watcher->deleteLater();
+        // A rebuild while this task was running replaced the items; the index no
+        // longer refers to the entry this result was computed for.
+        if (generation != recent_generation_) return;
+
         auto* item = recent_list_->item(idx);
         if (!info.isValid) {
             // hide invalid entries
@@ -336,10 +347,9 @@ void WorldListTab::loadNextRecentInfo() {
             auto* w = qobject_cast<WorldListItem*>(recent_list_->itemWidget(item));
             if (w) w->setInfo(info);
         }
-        watcher->deleteLater();
         loadNextRecentInfo();
     });
-    watcher->setFuture(QtConcurrent::run([idx, this]() { return LevelPathManager::makeLevelInfo(recent_paths_[idx]); }));
+    watcher->setFuture(QtConcurrent::run([path]() { return LevelPathManager::makeLevelInfo(path); }));
 }
 
 // ---------------------------------------------------------------------------

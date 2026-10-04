@@ -4,11 +4,12 @@
 namespace crashhandler {
 
     // Install crash reporting for this process. Hardware faults (access violation,
-    // divide-by-zero, ...) are caught via an SEH unhandled-exception filter, and
-    // abort-style signals (SIGABRT/SIGFPE) via signal handlers. Each prints a
-    // symbolized stack trace (libbacktrace reads the DWARF straight from the exe)
-    // to stderr and ./logs/crash_<ts>.log, then lets the process die normally.
-    // Call once, early in main().
+    // divide-by-zero, ...) and abort-style signals are caught and turned into a
+    // symbolized stack trace on stderr plus a crash_<ts>.log in the log directory.
+    //
+    // Windows uses an SEH unhandled-exception filter and libbacktrace (DWARF read
+    // straight from the exe, no PDB needed); POSIX installs sigaction handlers and
+    // symbolises with backtrace()/dladdr(). Call once, early in main().
     void install();
 
 }  // namespace crashhandler

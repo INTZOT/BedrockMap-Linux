@@ -999,6 +999,19 @@
     <name>QObject</name>
     <message>
         <location filename="../src/include/core/msg.h"/>
+        <source>msg.openglUnavailable</source>
+        <translation>An OpenGL context could not be created, so the 3D voxel view will stay empty.
+
+On a Wayland session (especially with an NVIDIA GPU) try the X11 backend instead:
+
+    QT_QPA_PLATFORM=xcb BedrockMap
+
+or run ./scripts/run.sh --x11.
+
+The 2D map and the NBT editor are not affected.</translation>
+    </message>
+    <message>
+        <location filename="../src/include/core/msg.h"/>
         <source>msg.levelNotOpen</source>
         <translation>Level is not opened</translation>
     </message>

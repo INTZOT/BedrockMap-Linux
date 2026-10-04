@@ -6,7 +6,6 @@
 #include <qlayoutitem.h>
 #include <qnamespace.h>
 #include <qwidget.h>
-#include <qwindowdefs_win.h>
 
 #include <QDialog>
 #include <QLayout>

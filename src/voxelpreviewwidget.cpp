@@ -137,7 +137,8 @@ QWidget* VoxelPreviewWidget::buildModelPanel() {
     model_info_label_ = new QLabel(group);
     model_info_label_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     QFont font;
-    font.setFamilies({QStringLiteral("JetBrains Mono"), QStringLiteral("Microsoft YaHei"), QStringLiteral("Microsoft YaHei UI")});
+    font.setFamilies({QStringLiteral("JetBrains Mono"), QStringLiteral("Microsoft YaHei"), QStringLiteral("Microsoft YaHei UI"),
+                      QStringLiteral("Noto Sans CJK SC"), QStringLiteral("Source Han Sans SC"), QStringLiteral("WenQuanYi Micro Hei")});
     model_info_label_->setFont(font);
     layout->addWidget(model_info_label_);
     refreshModelInfo();

@@ -30,11 +30,15 @@ namespace constant {
     extern const std::string SOFTWARE_NAME;
     extern const AppVersion SOFTWARE_VERSION;
 
-    extern const std::string CONFIG_FILE_PATH;
-    extern const std::string BLOCK_FILE_PATH;
-    extern const std::string BIOME_FILE_PATH;
-    extern const QString SHADER_FILE_PATH;
-    extern const QString TRANSLATION_FILES_PATH;
+    // Runtime paths, resolved by src/core/apppaths.cpp. Assets are searched next
+    // to the executable, in the XDG data directory, in the install prefix and in
+    // the source tree, so a Linux package and a development build both work
+    // without a fixed working directory.
+    [[nodiscard]] const QString& configFilePath();
+    [[nodiscard]] const std::string& blockFilePath();
+    [[nodiscard]] const std::string& biomeFilePath();
+    [[nodiscard]] const QString& shaderFilePath();
+    [[nodiscard]] const QString& translationFilesPath();
 
     constexpr uint8_t RW = 8u;
     constexpr int COORDS_REGION_SIZE = 128;
@@ -47,8 +51,6 @@ namespace constant {
     // 45°-only sun direction for basic shadow (renderStyle1)
     enum class SunDir { NW = 0, NE = 1, SW = 2, SE = 3 };
     constexpr SunDir SUN_DIRECTION = SunDir::NW;
-
-    extern const QString MCBE_LEVEL_PATH;
 
     region_pos c2r(const bl::chunk_pos& ch);
     void initColorTable();

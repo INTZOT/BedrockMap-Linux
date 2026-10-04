@@ -1,5 +1,7 @@
 #include "crashhandler.h"
 
+#ifdef _WIN32
+
 #include <backtrace.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -190,3 +192,146 @@ namespace crashhandler {
     }
 
 }  // namespace crashhandler
+
+#else  // POSIX (Linux, BSD, macOS)
+
+#include <dlfcn.h>
+#include <execinfo.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <string>
+
+#include "apppaths.h"
+#include "loguru/loguru.hpp"
+
+namespace crashhandler {
+    namespace {
+
+        // On POSIX the same fault kinds that Windows reports as SEH exceptions
+        // arrive as synchronous signals (SIGSEGV/SIGBUS/SIGFPE/SIGILL), so a single
+        // sigaction handler covers hardware faults and abort()/assert failures.
+        //
+        // The handler stays close to async-signal-safe: the report is written with
+        // write(2) to stderr and to <log dir>/crash_<ts>.log, using only fixed-size
+        // stack buffers. backtrace()/backtrace_symbols_fd() are glibc extensions
+        // that may allocate internally; combined with the frame-pointer builds of
+        // this project they are the standard way to symbolise without a debugger.
+        bool g_installed = false;
+        char g_crash_file_prefix[PATH_MAX];
+
+        void writeAll(int fd, const char* text, size_t length) {
+            while (length > 0) {
+                const ssize_t written = ::write(fd, text, length);
+                if (written <= 0) return;
+                text += written;
+                length -= static_cast<size_t>(written);
+            }
+        }
+
+        void appendFrameSymbol(char* out, size_t size, void* address) {
+            Dl_info info{};
+            if (::dladdr(address, &info) != 0 && info.dli_sname != nullptr) {
+                // Report the module-relative offset so the frame can still be
+                // resolved when the binary is stripped of local symbols.
+                const auto offset = reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(info.dli_saddr);
+                ::snprintf(out, size, "%s + 0x%zx", info.dli_sname, static_cast<size_t>(offset));
+            } else {
+                ::snprintf(out, size, "0x%llx", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address)));
+            }
+        }
+
+        void handler(int sig, siginfo_t* info, void* /*ucontext*/) {
+            // Restore the default disposition immediately: a fault inside the
+            // reporter must kill the process instead of recursing forever.
+            ::signal(sig, SIG_DFL);
+
+            char header[256];
+            const int header_len =
+                ::snprintf(header, sizeof header, "\n===== signal %d (%s) caught =====\nStack trace:\n", sig, ::strsignal(sig));
+
+            void* frames[64];
+            const int frame_count = ::backtrace(frames, 64);
+
+            int fd = -1;
+            if (g_crash_file_prefix[0] != '\0') {
+                char path[PATH_MAX + 32];
+                const time_t now = ::time(nullptr);
+                ::snprintf(path, sizeof path, "%s%ld.log", g_crash_file_prefix, static_cast<long>(now));
+                fd = ::open(path, O_CREAT | O_WRONLY | O_APPEND, 0644);
+            }
+
+            const int targets[2] = {STDERR_FILENO, fd};
+            char line[512];
+            for (const int target : targets) {
+                if (target < 0) continue;
+                writeAll(target, header, static_cast<size_t>(header_len));
+                if (info != nullptr && (sig == SIGSEGV || sig == SIGBUS) && info->si_addr != nullptr) {
+                    const int len = ::snprintf(line, sizeof line, "  fault address: %p\n", info->si_addr);
+                    writeAll(target, line, static_cast<size_t>(len));
+                }
+                // glibc prints "path(symbol+offset) [address]" per frame. Build the
+                // lines explicitly so the report is readable without addr2line.
+                for (int i = 0; i < frame_count; ++i) {
+                    char symbol[256];
+                    appendFrameSymbol(symbol, sizeof symbol, frames[i]);
+                    const int len = ::snprintf(line, sizeof line, "  #%-2d %s\n", i, symbol);
+                    writeAll(target, line, static_cast<size_t>(len));
+                }
+                writeAll(target, "===== end =====\n", ::strlen("===== end =====\n"));
+            }
+            if (fd >= 0) ::close(fd);
+
+            // Best effort: also leave the tail in the regular run log, where the
+            // last lines before the crash give the context.
+            LOG_F(ERROR, "signal %d (%s) caught; full report written to stderr and the crash log", sig, ::strsignal(sig));
+
+            // Re-raise with the default handler so the exit status and core-dump
+            // behaviour match an unhandled crash (gdb/systemd-coredump still work).
+            ::raise(sig);
+        }
+
+        void installHandler(int sig) {
+            struct sigaction action {};
+            action.sa_sigaction = handler;
+            action.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESETHAND;
+            sigemptyset(&action.sa_mask);
+            sigaction(sig, &action, nullptr);
+        }
+
+    }  // namespace
+
+    void install() {
+        if (g_installed) return;
+        g_installed = true;
+
+        // The reporter needs a directory that is writable at crash time; resolve it
+        // now (the lookup touches the filesystem and is not signal-safe).
+        const std::string log_dir = apppaths::logDir().toStdString();
+        ::snprintf(g_crash_file_prefix, sizeof g_crash_file_prefix, "%s/crash_", log_dir.c_str());
+
+        // Run the handler on an alternate stack so a stack overflow (SIGSEGV with
+        // no usable stack left) can still be reported. SIGSTKSZ is not a compile
+        // time constant on recent glibc, so use a fixed, comfortably large stack.
+        static char alternate_stack[64 * 1024];
+        stack_t stack{};
+        stack.ss_sp = alternate_stack;
+        stack.ss_size = sizeof alternate_stack;
+        sigaltstack(&stack, nullptr);
+
+        installHandler(SIGSEGV);
+        installHandler(SIGBUS);
+        installHandler(SIGFPE);
+        installHandler(SIGILL);
+        installHandler(SIGABRT);
+    }
+
+}  // namespace crashhandler
+
+#endif  // _WIN32

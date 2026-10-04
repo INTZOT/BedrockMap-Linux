@@ -221,7 +221,8 @@ QString ToolBarIcon(const QString& name) {
     return path.isEmpty() ? QString(":/res/ui/%1/%2.png").arg(setting::current().ICON_THEME, name) : path;
 }
 void TranslatorMgr::init() {
-    const auto& langs = constant::TRANSLATION_FILES_PATH;
+    const auto langs = constant::translationFilesPath();
+    LOG_F(INFO, "Translation directory: %s", langs.toStdString().c_str());
     // tranverse all the .qm files and load them into the translations map
     QDirIterator it(langs, QStringList() << "*.qm", QDir::Files);
     while (it.hasNext()) {

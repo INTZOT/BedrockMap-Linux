@@ -16,7 +16,8 @@ HexViewerDialog::HexViewerDialog(QWidget* parent) : QDialog(parent) {
     hex_view_ = new QHexView(this);
     // match the NbtWidget look: mono first, CJK fallback
     QFont font;
-    font.setFamilies({"JetBrains Mono", "Microsoft YaHei", "Microsoft YaHei UI"});
+    font.setFamilies({"JetBrains Mono", "Microsoft YaHei", "Microsoft YaHei UI", "Noto Sans CJK SC", "Source Han Sans SC",
+                      "WenQuanYi Micro Hei"});
     hex_view_->setFont(font);
     layout->addWidget(hex_view_);
 

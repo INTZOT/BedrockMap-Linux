@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <string>
 
+#include "apppaths.h"
 #include "color.h"
 #include "loguru/loguru.hpp"
 
@@ -77,21 +78,44 @@ const std::string constant::SOFTWARE_NAME = "BedrockMap";
 const AppVersion constant::SOFTWARE_VERSION{{1, 1, 0}};
 const int constant::GRID_WIDTH = 32;
 
-#ifdef QT_DEBUG
-const std::string constant::CONFIG_FILE_PATH = R"(../config.ini)";
-const std::string constant::BLOCK_FILE_PATH = R"(../bedrock-level/data/colors/block_color.json)";
-const std::string constant::BIOME_FILE_PATH = R"(../bedrock-level/data/colors/biome_color.json)";
-const QString constant::SHADER_FILE_PATH = R"(../res/shaders/voxel)";
-const QString constant::TRANSLATION_FILES_PATH = R"(./)";
-#else
-const std::string constant::CONFIG_FILE_PATH = "config.ini";
-const std::string constant::BLOCK_FILE_PATH = "block_color.json";
-const std::string constant::BIOME_FILE_PATH = "biome_color.json";
-const QString constant::SHADER_FILE_PATH = "shaders/voxel";
-const QString constant::TRANSLATION_FILES_PATH = R"(./translations)";
-#endif
+// Paths are resolved at runtime (see apppaths.cpp) instead of being baked in at
+// compile time: on Linux the application is installed under a prefix while the
+// user configuration lives in the XDG directories, and development builds run
+// from the CMake binary directory. Each accessor caches its first successful
+// resolution so file lookups stay cheap.
+const QString& constant::configFilePath() {
+    static const QString path = apppaths::configFile();
+    return path;
+}
 
-const QString constant::MCBE_LEVEL_PATH = "/Packages/Microsoft.MinecraftUWP_8wekyb3d8bbwe/LocalState/games/com.mojang/minecraftWorlds";
+const std::string& constant::blockFilePath() {
+    static const std::string path =
+        apppaths::dataFile(QStringLiteral("block_color.json"), QStringLiteral("bedrock-level/data/colors/block_color.json"))
+            .toStdString();
+    return path;
+}
+
+const std::string& constant::biomeFilePath() {
+    static const std::string path =
+        apppaths::dataFile(QStringLiteral("biome_color.json"), QStringLiteral("bedrock-level/data/colors/biome_color.json"))
+            .toStdString();
+    return path;
+}
+
+const QString& constant::shaderFilePath() {
+    static const QString path = apppaths::dataFile(QStringLiteral("shaders/voxel"), QStringLiteral("res/shaders/voxel"));
+    return path;
+}
+
+const QString& constant::translationFilesPath() {
+    static const QString path = [] {
+        const QString dir = apppaths::translationsDir();
+        // Fall back to the expected install location so the "no translation
+        // found" warning points at a meaningful directory.
+        return dir.isEmpty() ? apppaths::dataFile(QStringLiteral("translations")) : dir;
+    }();
+    return path;
+}
 
 region_pos constant::c2r(const bl::chunk_pos& ch) {
     auto cx = ch.x < 0 ? ch.x - constant::RW + 1 : ch.x;
@@ -116,11 +140,13 @@ const setting::Settings& setting::current() { return mutableSettings(); }
 
 // Utility functions
 void constant::initColorTable() {
-    if (!bl::init_biome_color_palette_from_file(constant::BIOME_FILE_PATH)) {
-        LOG_F(WARNING, "Can not load biome color file in path: %s", BIOME_FILE_PATH.c_str());
+    // Upstream replaced the TINT_BRIGHTNESS setting with the BIOME_TINT_BRIGHTNESS
+    // constant in res/shaders/map2d.frag, so only the runtime path lookup remains.
+    if (!bl::init_biome_color_palette_from_file(constant::biomeFilePath())) {
+        LOG_F(WARNING, "Can not load biome color file in path: %s", constant::biomeFilePath().c_str());
     }
-    if (!bl::init_block_color_from_file(constant::BLOCK_FILE_PATH)) {
-        LOG_F(WARNING, "Can not load block color file in path: %s", BLOCK_FILE_PATH.c_str());
+    if (!bl::init_block_color_from_file(constant::blockFilePath())) {
+        LOG_F(WARNING, "Can not load block color file in path: %s", constant::blockFilePath().c_str());
     }
     bl::config::set_log_missing_block_color(false);
     bl::config::set_log_mismatched_actor(false);
@@ -128,14 +154,18 @@ void constant::initColorTable() {
 
 void setting::init() {
     LOG_F(INFO, "Current working directory: %s", QDir::currentPath().toStdString().c_str());
-    LOG_F(INFO, "Configuration file path: %s", constant::CONFIG_FILE_PATH.c_str());
+    LOG_F(INFO, "Configuration file path: %s", constant::configFilePath().toStdString().c_str());
+    LOG_F(INFO, "Data directory: %s", apppaths::dataDir().toStdString().c_str());
 
-    if (!QFile::exists(constant::CONFIG_FILE_PATH.c_str())) LOG_F(INFO, "Config file not found, using defaults");
+    if (!QFile::exists(constant::configFilePath())) {
+        LOG_F(INFO, "Config file not found, writing defaults");
+        setting::save();
+    }
     setting::load();
 }
 
 void setting::load() {
-    QSettings s(constant::CONFIG_FILE_PATH.c_str(), QSettings::IniFormat);
+    QSettings s(constant::configFilePath(), QSettings::IniFormat);
 
     foreach (const auto& key, s.allKeys()) {
         LOG_F(INFO, "Config key: %s, value: %s", key.toStdString().c_str(), s.value(key).toString().toStdString().c_str());
@@ -235,7 +265,7 @@ void setting::load() {
 void setting::save() { save(current()); }
 
 void setting::save(const Settings& values) {
-    QSettings s(constant::CONFIG_FILE_PATH.c_str(), QSettings::IniFormat);
+    QSettings s(constant::configFilePath(), QSettings::IniFormat);
 
     s.beginGroup("Gui");
     s.setValue("theme", values.COLOR_THEME);
@@ -309,5 +339,5 @@ void setting::save(const Settings& values) {
 
     s.sync();
 
-    LOG_F(INFO, "Settings saved to %s", constant::CONFIG_FILE_PATH.c_str());
+    LOG_F(INFO, "Settings saved to %s", constant::configFilePath().toStdString().c_str());
 }

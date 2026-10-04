@@ -57,6 +57,17 @@ class LevelPathManager {
     static const std::string DIR_MINECRAFT_BEDROCK;
     static const std::string DIR_MINECRAFT_BEDROCK_PREVIEW;
 
+#ifndef _WIN32
+    // Linux world containers. Minecraft Bedrock has no native Linux build, so the
+    // game data lives in whichever launcher/compatibility layer installed it:
+    // mcpelauncher (native or Flatpak) and Waydroid are the common ones.
+    [[nodiscard]] static const QStringList& linuxWorldRoots();
+#endif
+
+    // Suggested start directory for the "open world" file dialog: the first
+    // world container that exists on this system, or the home directory.
+    [[nodiscard]] static QString defaultScanPath();
+
    private:
     std::vector<ScanPathEntry> scan_paths_;
     std::vector<LevelPathInfo> discovered_levels_;
