@@ -32,7 +32,31 @@ set(BEDROCK_LEVEL_ROOT "${PROJECT_SOURCE_DIR}/bedrock-level")
 # The library's standalone scripts own its unit-test builds; keep the GUI build
 # focused on the application and never pull GoogleTest into this build tree.
 set(BEDROCK_LEVEL_BUILD_TESTS OFF CACHE BOOL "Disable bedrock-level tests in the GUI build" FORCE)
+
+# bedrock-level only ships prebuilt Windows binaries of leveldb-mcpe (the LevelDB
+# fork with zlib compression). On Linux the dependency is located or built from
+# source first (see cmake/LevelDbMcpe.cmake) and handed to the library below.
+if(UNIX)
+    include(${PROJECT_SOURCE_DIR}/cmake/LevelDbMcpe.cmake)
+endif()
+
 add_subdirectory(${BEDROCK_LEVEL_ROOT} bedrock-level)
+
+if(UNIX)
+    # bedrock-level vendors LevelDB headers that do not exactly match the library
+    # built above (in-class initialisers instead of an out-of-line Options ctor),
+    # so put the pristine headers of the linked build in front of the vendored ones
+    # and link the library itself.
+    get_target_property(_bedrock_level_includes bedrock-level INCLUDE_DIRECTORIES)
+    list(FIND _bedrock_level_includes "${BEDROCK_LEVEL_ROOT}/third" _vendored_leveldb_index)
+    if(_vendored_leveldb_index GREATER -1)
+        list(INSERT _bedrock_level_includes ${_vendored_leveldb_index} "${LEVELDB_MCPE_INCLUDE_DIR}")
+    else()
+        list(APPEND _bedrock_level_includes "${LEVELDB_MCPE_INCLUDE_DIR}")
+    endif()
+    set_target_properties(bedrock-level PROPERTIES INCLUDE_DIRECTORIES "${_bedrock_level_includes}")
+    target_link_libraries(bedrock-level PRIVATE leveldb_mcpe ZLIB::ZLIB)
+endif()
 
 find_package(Qt6 REQUIRED COMPONENTS 
     Core 
@@ -42,8 +66,13 @@ find_package(Qt6 REQUIRED COMPONENTS
     OpenGLWidgets
     Svg
     Network
-    LinguistTools
 )
+
+# lupdate/lrelease are optional: distributions frequently split the Linguist tools
+# into a separate package (qt6-tools on Arch, qttools6-dev-tools on Debian). When
+# they are missing, the translation catalogues are compiled with any lrelease that
+# can be found (including the one bundled with PySide6) or skipped with a warning.
+find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
 # QHexView hex widget library (vendored in third/). Disable its bundled example
 # app (removed) and keep the find/replace dialogs which QHexView core needs.
@@ -56,7 +85,12 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third/QHexView third/QHexView)
 # ordinary application builds do not spend time compiling profiling tools.
 add_subdirectory(${PROJECT_SOURCE_DIR}/benchmark)
 
-set(APP_ICON_RESOURCE_WINDOWS "${CMAKE_CURRENT_SOURCE_DIR}/icon.rc")
+# The Windows resource script embeds the .ico into the executable; Linux uses the
+# .desktop entry and the SVG icon installed further down instead.
+set(APP_ICON_RESOURCE_WINDOWS "")
+if(WIN32)
+    set(APP_ICON_RESOURCE_WINDOWS "${CMAKE_CURRENT_SOURCE_DIR}/icon.rc")
+endif()
 
 file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS
         src/*.ui
@@ -91,21 +125,51 @@ set(TS_FILES
     translations/en.ts
 )
 
-qt6_add_translations(BedrockMap
-    TS_FILES ${TS_FILES}
-)
-
 add_executable(BedrockMap
     ${SRC_FILES}
     ${APP_ICON_RESOURCE_WINDOWS}
     ${QRC_FILE}
 )
 
+set(QM_FILES "")
+if(TARGET Qt6::lrelease)
+    qt6_add_translations(BedrockMap
+        TS_FILES ${TS_FILES}
+        QM_FILES_OUTPUT_VARIABLE QM_FILES
+    )
+else()
+    find_program(BEDROCKMAP_LRELEASE_EXECUTABLE NAMES lrelease lrelease6 lrelease-qt6 pyside6-lrelease)
+    if(BEDROCKMAP_LRELEASE_EXECUTABLE)
+        message(STATUS "Qt LinguistTools not found; compiling translations with ${BEDROCKMAP_LRELEASE_EXECUTABLE}")
+        foreach(TS_FILE ${TS_FILES})
+            get_filename_component(TS_LANG ${TS_FILE} NAME_WE)
+            set(TS_QM "${CMAKE_CURRENT_BINARY_DIR}/${TS_LANG}.qm")
+            add_custom_command(
+                OUTPUT ${TS_QM}
+                COMMAND ${BEDROCKMAP_LRELEASE_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/${TS_FILE}" -qm "${TS_QM}"
+                DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${TS_FILE}"
+                COMMENT "Compiling translation ${TS_LANG}.qm"
+                VERBATIM
+            )
+            list(APPEND QM_FILES ${TS_QM})
+        endforeach()
+        add_custom_target(BedrockMapTranslations ALL DEPENDS ${QM_FILES})
+    else()
+        message(WARNING
+            "Qt LinguistTools, lrelease and pyside6-lrelease were all not found: "
+            "the application will run with the untranslated (English) interface. "
+            "Install qt6-tools (Arch) / qttools6-dev-tools (Debian) to enable translations.")
+    endif()
+endif()
+
 target_include_directories(BedrockMap PRIVATE
     ${PROJECT_SOURCE_DIR}/src/include/core
     ${PROJECT_SOURCE_DIR}/src/include/ui
     ${PROJECT_SOURCE_DIR}/src/include
     ${PROJECT_SOURCE_DIR}/third
+    # Same reason as for bedrock-level above: the headers must match the linked
+    # leveldb-mcpe build (Windows keeps using the vendored Windows copies).
+    $<$<BOOL:${LEVELDB_MCPE_INCLUDE_DIR}>:${LEVELDB_MCPE_INCLUDE_DIR}>
 )
 
 target_link_libraries(BedrockMap PRIVATE
@@ -120,11 +184,43 @@ target_link_libraries(BedrockMap PRIVATE
     bedrock-level
 )
 
+if(UNIX)
+    # The application includes LevelDB headers itself (leveltabwidget.h) and must
+    # compile against the same build bedrock-level links; this also propagates the
+    # DLLX export macro the upstream headers require.
+    target_link_libraries(BedrockMap PRIVATE leveldb_mcpe)
+
+    # The vendored Windows headers add DB::LastSequence(); upstream leveldb-mcpe
+    # does not have it. Detect it so the debug dialog can fall back gracefully.
+    file(READ "${LEVELDB_MCPE_INCLUDE_DIR}/leveldb/db.h" BEDROCKMAP_LEVELDB_DB_HEADER)
+    if(BEDROCKMAP_LEVELDB_DB_HEADER MATCHES "LastSequence")
+        target_compile_definitions(BedrockMap PRIVATE BEDROCKMAP_LEVELDB_HAS_LAST_SEQUENCE=1)
+    endif()
+else()
+    # The vendored Windows headers always provide it.
+    target_compile_definitions(BedrockMap PRIVATE BEDROCKMAP_LEVELDB_HAS_LAST_SEQUENCE=1)
+endif()
+
 target_precompile_headers(BedrockMap PRIVATE
     src/include/pch.h
 )
 
 target_compile_definitions(BedrockMap PRIVATE NOMINMAX)
+
+# -rdynamic exports the executable's own symbols so the Linux crash handler can
+# resolve function names out of the backtrace without a debugger attached, and the
+# line tables kept by -g1 let addr2line turn the logged addresses into file:line
+# (same trade-off as the MinGW branch below: no full -g bloat).
+if(UNIX AND NOT APPLE)
+    target_link_options(BedrockMap PRIVATE -rdynamic)
+    if(BEDROCKMAP_FULL_DEBUG)
+        target_compile_options(BedrockMap PRIVATE -g)
+    else()
+        # Debug keeps the standard full -g; the other configurations get line
+        # tables only.
+        target_compile_options(BedrockMap PRIVATE $<$<NOT:$<CONFIG:Debug>>:-g1>)
+    endif()
+endif()
 
 execute_process(
     COMMAND git rev-parse --short=7 HEAD
@@ -179,3 +275,35 @@ endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
     target_compile_definitions(BedrockMap PRIVATE QT_NO_DEBUG_OUTPUT)
 endif()
+
+# ---------------------------------------------------------------------------
+# Linux/POSIX install layout (cmake --install). Windows keeps using deploy.ps1.
+#   <prefix>/bin/BedrockMap
+#   <prefix>/share/BedrockMap/{block_color.json,biome_color.json,translations/}
+#   <prefix>/share/applications/BedrockMap.desktop
+#   <prefix>/share/icons/hicolor/scalable/apps/BedrockMap.svg
+# ---------------------------------------------------------------------------
+if(UNIX)
+    include(GNUInstallDirs)
+
+    install(TARGETS BedrockMap RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # Colour tables are runtime data, not compiled resources: they are copied next
+    # to the executable so the packaging stays inspectable and replaceable.
+    install(FILES
+        "${BEDROCK_LEVEL_ROOT}/data/colors/block_color.json"
+        "${BEDROCK_LEVEL_ROOT}/data/colors/biome_color.json"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/BedrockMap
+    )
+
+    if(QM_FILES)
+        install(FILES ${QM_FILES} DESTINATION ${CMAKE_INSTALL_DATADIR}/BedrockMap/translations)
+    endif()
+
+    install(FILES "${PROJECT_SOURCE_DIR}/packaging/BedrockMap.desktop"
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES "${PROJECT_SOURCE_DIR}/BedrockMap.svg"
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+            RENAME BedrockMap.svg)
+endif()
+

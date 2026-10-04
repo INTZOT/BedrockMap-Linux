@@ -1,0 +1,25 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -19,7 +19,10 @@
+   set(CMAKE_CXX_EXTENSIONS OFF)
+ endif(NOT CMAKE_CXX_STANDARD)
+ 
+-add_library(leveldb_mcpe SHARED)
++# Linux/UNIX port: build a static library so the application can be installed
++# without shipping an extra shared object (and without rpath juggling).
++add_library(leveldb_mcpe STATIC)
++set_target_properties(leveldb_mcpe PROPERTIES POSITION_INDEPENDENT_CODE ON)
+ 
+ if (WIN32)
+ 	# set windows 7 as the minimum version
+@@ -38,7 +41,9 @@
+ endif()
+ 
+ target_include_directories(leveldb_mcpe PRIVATE ${ZLIB_INCLUDE_DIRS})
+-target_link_libraries( leveldb_mcpe PRIVATE zlibstatic )
++# Upstream links a "zlibstatic" target that only exists inside its own Windows
++# build tree; use the system zlib through CMake's imported target instead.
++target_link_libraries( leveldb_mcpe PRIVATE ZLIB::ZLIB )
+ 
+ target_include_directories(leveldb_mcpe PRIVATE . PUBLIC include)
+ target_sources(leveldb_mcpe PRIVATE db/builder.cc)

@@ -91,3 +91,11 @@ maps
 config.ini
 .github/agents/*
 docs/*
+# The Linux port keeps its user-facing guide tracked even though upstream
+# ignores newly added files under docs/.
+!docs/Linux.md
+
+# Linux port: fetched/build dependencies and packaging output
+dist/
+third/leveldb-mcpe/
+compile_commands.json
