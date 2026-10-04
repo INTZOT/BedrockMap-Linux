@@ -232,9 +232,21 @@ if (auto* playerList = data->get<bl::nbt::list_tag>("PlayerIds")) {
 
 ## Terminal Commands
 
+Windows:
+
 - Build + run: `.\scripts\build_run.ps1`
 - Build only: `.\scripts\build.ps1`
 - Run only (no build): `.\scripts\run.ps1`
 - Quick incremental rebuild (skip lupdate / translation update):
   `cmake --build build --config Debug -j 32`
 - Translation update: `lupdate .\ -ts .\translations\zh_CN.ts .\translations\en.ts`
+
+Linux (see `docs/Linux.md` for dependencies and packaging):
+
+- Build: `./scripts/build.sh` (Debug -> `build/`) or `./scripts/build.sh --release` (`build_rls/`)
+- Run: `./scripts/run.sh` (add `--x11` on Wayland setups where Qt cannot create a
+  GL context)
+- Install: `./scripts/install.sh [--prefix DIR]`, package: `./scripts/deploy.sh`
+- Quick incremental rebuild: `cmake --build build --parallel $(nproc)`
+- Translation update: `lupdate -recursive ./src -ts translations/zh_CN.ts translations/en.ts`
+  (or `pyside6-lupdate` when Qt LinguistTools is not installed)

@@ -30,7 +30,7 @@ Grab the latest release from the [Releases page](https://github.com/bedrock-dev/
 
 ## System Requirements
 
-- **OS** — Windows 10
+- **OS** — Windows 10, or Linux with Qt 6.5+ (X11 / Wayland; see [docs/Linux.md](./docs/Linux.md))
 
 ## Quick Start
 
@@ -52,6 +52,8 @@ Key shortcuts:
 
 ## Build
 
+Windows:
+
 ```powershell
 # Clone with submodules
 git clone --recursive https://github.com/bedrock-dev/BedrockMap.git
@@ -59,6 +61,22 @@ git clone --recursive https://github.com/bedrock-dev/BedrockMap.git
 # Build BedrockMap
 .\scripts\build.ps1 -buildBL
 ```
+
+Linux:
+
+```bash
+git clone --recursive https://github.com/bedrock-dev/BedrockMap.git
+cd BedrockMap
+
+./scripts/build.sh            # Debug   -> build/
+./scripts/build.sh --release  # Release -> build_rls/
+./scripts/run.sh              # start the freshly built binary
+```
+
+The Linux build fetches and statically links leveldb-mcpe automatically, stores
+configuration/logs in the XDG directories and ships a `.desktop` entry
+(`./scripts/install.sh`). Full details, dependency lists and troubleshooting:
+[docs/Linux.md](./docs/Linux.md).
 
 ## Supported MCBE Versions
 

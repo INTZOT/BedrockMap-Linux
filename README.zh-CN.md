@@ -30,7 +30,7 @@
 
 ## 系统要求
 
-- **操作系统** — Windows 10
+- **操作系统** — Windows 10，或安装了 Qt 6.5+ 的 Linux（X11 / Wayland，详见 [docs/Linux.md](./docs/Linux.md)）
 
 ## 快速上手
 
@@ -52,6 +52,8 @@
 
 ## 构建
 
+Windows：
+
 ```powershell
 # 使用子模块克隆
 git clone --recursive https://github.com/bedrock-dev/BedrockMap.git
@@ -59,6 +61,22 @@ git clone --recursive https://github.com/bedrock-dev/BedrockMap.git
 # 构建 BedrockMap
 .\scripts\build.ps1 -buildBL
 ```
+
+Linux（Qt 6.5+，X11 / Wayland）：
+
+```bash
+git clone --recursive https://github.com/bedrock-dev/BedrockMap.git
+cd BedrockMap
+
+./scripts/build.sh            # Debug   -> build/
+./scripts/build.sh --release  # Release -> build_rls/
+./scripts/run.sh              # 运行刚构建的程序
+./scripts/install.sh          # 安装到 ~/.local（含桌面图标）
+```
+
+Linux 构建会自动获取并静态链接 leveldb-mcpe，配置与日志遵循 XDG 目录规范，
+并附带 `.desktop` 桌面入口。依赖安装、存档路径、打包与故障排查见
+[docs/Linux.md](./docs/Linux.md)。
 
 ## 支持的 MCBE 版本
 
