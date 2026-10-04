@@ -4,6 +4,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGridLayout>
@@ -26,6 +27,8 @@
 #include "config.h"
 #include "leveltabwidget.h"
 #include "loguru/loguru.hpp"
+#include "opengl_support.h"
+#include "resourcemanager.h"
 #include "settingsdialog.h"
 #include "updatechecker.h"
 #include "updatedialog.h"
@@ -52,11 +55,22 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // QOpenGLWidget child that is created before the window is shown, so the
     // main window is born as OpenGLSurface and later embedding a voxel view in
     // a tab does not trigger a window recreation.
-    auto* gl_warmup = new QOpenGLWidget(this);
-    gl_warmup->hide();
+    //
+    // Only do this when OpenGL actually works: on a system where Qt cannot create
+    // a GL context (Wayland with an NVIDIA GPU, for instance) forcing the surface
+    // type to OpenGL keeps the window from ever being mapped, so starting the
+    // application from the desktop shell looks like nothing happens at all.
+    if (opengl_support::available()) {
+        auto* gl_warmup = new QOpenGLWidget(this);
+        gl_warmup->hide();
+    }
 
     setGeometry(centerMainWindowGeometry(0.6));
-    setWindowIcon(QIcon(":/res/ui/icon.png"));
+    // The window icon follows the configured toolbar icon theme; only the classic
+    // theme ships icon.png, so fall back to it (and to the installed .desktop icon
+    // on Linux, which the compositor uses for the task bar).
+    const QString window_icon = ToolBarIcon(QStringLiteral("icon"));
+    setWindowIcon(QFile::exists(window_icon) ? QIcon(window_icon) : QIcon(QStringLiteral(":/res/ui/classic/icon.png")));
 
     setupUI();
     setupMenuBar();
@@ -515,7 +529,7 @@ void MainWindow::rebuildRecentMenu() {
 
 void MainWindow::openLevel(const QString& startPath) {
     auto path = startPath;
-    if (path.isEmpty()) path = QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation)[0] + constant::MCBE_LEVEL_PATH;
+    if (path.isEmpty()) path = LevelPathManager::defaultScanPath();
     QString root = QFileDialog::getExistingDirectory(this, "", path, QFileDialog::ShowDirsOnly);
     if (root.isEmpty()) return;
     this->level_tab_widget_->openNewLevel(root);
@@ -563,6 +577,14 @@ void MainWindow::openDroppedPath(const QString& path) {
     if (openDataFile(path)) {
         level_path_mgr_.addRecentPath(path);
         rebuildRecentMenu();
+    }
+}
+
+void MainWindow::openExternalPath(const QString& path) {
+    if (canOpenDroppedPath(path)) {
+        openDroppedPath(path);
+    } else {
+        LOG_F(WARNING, "Ignoring path that cannot be opened: %s", path.toStdString().c_str());
     }
 }
 

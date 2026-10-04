@@ -30,6 +30,7 @@
 #include "hsaeditorwidget.h"
 #include "loguru/loguru.hpp"
 #include "msg.h"
+#include "opengl_support.h"
 #include "nbt.h"
 #include "nbtwidget.h"
 #include "resourcemanager.h"
@@ -138,7 +139,10 @@ ChunkEditorWidget::ChunkEditorWidget(QWidget* parent, AsyncLevelLoader* levelLoa
     ui->stats_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     ui->stats_table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     QFont f;
-    f.setFamilies({"JetBrains Mono", "Microsoft YaHei", "Microsoft YaHei UI"});
+    // JetBrains Mono ships with the application; the CJK entries fall back to the
+    // platform default when the Windows fonts are unavailable (Linux).
+    f.setFamilies({"JetBrains Mono", "Microsoft YaHei", "Microsoft YaHei UI", "Noto Sans CJK SC", "Source Han Sans SC",
+                   "WenQuanYi Micro Hei"});
     ui->stats_table->setFont(f);
 }
 
@@ -449,6 +453,12 @@ void ChunkEditorWidget::on_import_btn_clicked() {
 
 void ChunkEditorWidget::on_view_3d_btn_clicked() {
     if (!has_chunk_ || !terrain_render_widget_) return;
+    // The preview is a QOpenGLWidget; without a usable GL context its window would
+    // never be mapped, so explain the situation instead of opening nothing.
+    if (!opengl_support::available()) {
+        WARN(msg::OPENGL_UNAVAILABLE());
+        return;
+    }
     terrain_render_widget_->resize(300, 400);
     terrain_render_widget_->show();
     terrain_render_widget_->raise();

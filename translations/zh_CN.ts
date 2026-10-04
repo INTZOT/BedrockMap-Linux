@@ -1022,6 +1022,19 @@
     <name>QObject</name>
     <message>
         <location filename="../src/include/core/msg.h"/>
+        <source>msg.openglUnavailable</source>
+        <translation>无法创建 OpenGL 上下文，3D 体素视图将无法显示。
+
+如果使用 Wayland 桌面（尤其是 NVIDIA 显卡），可以改用 X11 后端启动：
+
+    QT_QPA_PLATFORM=xcb BedrockMap
+
+或运行 ./scripts/run.sh --x11。
+
+2D 地图、NBT 编辑等功能不受影响。</translation>
+    </message>
+    <message>
+        <location filename="../src/include/core/msg.h"/>
         <source>msg.levelNotOpen</source>
         <translation>未打开存档</translation>
     </message>

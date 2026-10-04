@@ -66,6 +66,9 @@ namespace msg {
     inline QString EXPORT_COMPLETE() { return QObject::tr("msg.exportComplete"); }
     inline QString NO_CHUNK_FOUND() { return QObject::tr("msg.noChunkFound"); }
 
+    // platform
+    inline QString OPENGL_UNAVAILABLE() { return QObject::tr("msg.openglUnavailable"); }
+
     // nbt editor
     inline QString CREATE_NODE_FAILED(const QString& err) { return QObject::tr("msg.createNodeFailed") + err; }
     inline QString MODIFY_NODE_FAILED(const QString& err) { return QObject::tr("msg.modifyNodeFailed") + err; }

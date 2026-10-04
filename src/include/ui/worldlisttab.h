@@ -80,6 +80,9 @@ class WorldListTab : public QWidget {
 
     // lazy async loader for recent items
     int next_recent_idx_ = 0;
+    // Bumped whenever the list is rebuilt: results of tasks that were started for
+    // a previous list are dropped instead of being applied to the new items.
+    int recent_generation_ = 0;
     QFutureWatcher<LevelPathInfo>* recent_watcher_ = nullptr;
 };
 

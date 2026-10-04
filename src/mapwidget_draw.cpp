@@ -26,9 +26,9 @@
 #include <QPen>
 #include <QRectF>
 #include <QRgb>
-#include <Qmainwindow>
+#include <QMainWindow>
+#include <QWidget>
 #include <QtOpenGLWidgets/QtOpenGLWidgets>
-#include <Qwidget>
 #include <cmath>
 #include <utility>
 #include <vector>

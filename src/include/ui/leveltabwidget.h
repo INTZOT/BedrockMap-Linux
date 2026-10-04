@@ -17,7 +17,10 @@ class LevelDBDebugDialog : public QDialog {
    public:
     LevelDBDebugDialog(QWidget* widget) : QDialog(widget) {
         setWindowTitle("LevelDB Stats");
-        setFont(QFont("Consolas"));
+        // Qt picks the first installed family; Consolas only exists on Windows.
+        QFont mono;
+        mono.setFamilies({"Consolas", "JetBrains Mono", "DejaVu Sans Mono", "Noto Sans Mono CJK SC", "monospace"});
+        setFont(mono);
         label = new QLabel(this);
         layout = new QVBoxLayout(this);
         layout->addWidget(label);
@@ -28,7 +31,14 @@ class LevelDBDebugDialog : public QDialog {
     void initData(leveldb::DB* db) {
         QStringList data;
         if (db) {
+            // bedrock-level's vendored leveldb-mcpe fork adds DB::LastSequence();
+            // the upstream build used on Linux does not expose it, so the CMake
+            // build defines this macro only when the method is available.
+#ifdef BEDROCKMAP_LEVELDB_HAS_LAST_SEQUENCE
             data << QString("Last Sequence Number:     %1").arg(db->LastSequence());
+#else
+            data << QString("Last Sequence Number:     %1").arg(QStringLiteral("n/a"));
+#endif
 
             uint64_t disk;
             leveldb::Range range(leveldb::Slice(""), leveldb::Slice("\xff\xff\xff\xff"));

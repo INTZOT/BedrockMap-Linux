@@ -26,9 +26,9 @@
 #include <QPen>
 #include <QRectF>
 #include <QRgb>
-#include <Qmainwindow>
+#include <QMainWindow>
+#include <QWidget>
 #include <QtOpenGLWidgets/QtOpenGLWidgets>
-#include <Qwidget>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -41,6 +41,7 @@
 #include "loguru/loguru.hpp"
 #include "mapwidget.h"
 #include "msg.h"
+#include "opengl_support.h"
 #include "pleasewaitdialog.h"
 #include "voxelwidget.h"
 
@@ -255,6 +256,12 @@ bool MapWidget::modificationBlocked() {
 
 void MapWidget::show3DView(int dim) {
     if (selection_.isEmpty() || selection_.rectCount() != 1) return;
+    // The voxel view is the only feature that needs an OpenGL context; tell the
+    // user why nothing shows up when this system cannot provide one.
+    if (!opengl_support::available()) {
+        WARN(msg::OPENGL_UNAVAILABLE());
+        return;
+    }
     auto rect = selection_.region().boundingRect();
     bl::chunk_pos minPos(rect.x(), rect.y(), dim);
     bl::chunk_pos maxPos(rect.x() + rect.width() - 1, rect.y() + rect.height() - 1, dim);

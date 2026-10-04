@@ -52,6 +52,10 @@ class MainWindow : public QMainWindow {
    public slots:
     inline bool enable_write() const { return this->write_mode_; }
 
+    // Opens a world directory or data file passed on the command line (also used
+    // by the .desktop entry). Paths that cannot be opened are ignored.
+    void openExternalPath(const QString& path);
+
    private slots:
     void openLevel(const QString& startPath = QString());
     void openFile();

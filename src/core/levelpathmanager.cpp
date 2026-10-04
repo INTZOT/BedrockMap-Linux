@@ -32,6 +32,46 @@ namespace {
         }
     }
 
+#ifndef _WIN32
+    // BedrockBoot (a Linux launcher that runs the Windows GDK build through Proton)
+    // keeps the game data inside its Wine/Proton prefix. The per-user layout there
+    // is the ordinary desktop one:
+    //   <prefix>/drive_c/users/<user>/AppData/Roaming/Minecraft Bedrock/Users/<id>/
+    //       games/com.mojang/minecraftWorlds
+    // which is exactly what scanModernPaths() walks, so only the "AppData" roots
+    // have to be handed over as modern scan paths.
+    QStringList bedrockBootAppDataDirs() {
+        QStringList result;
+        const QString configRoot = QDir::homePath() + QStringLiteral("/.config/RoundStudio/BedrockBoot2");
+        if (!QDir(configRoot).exists()) return result;
+
+        // Prefixes live at <configRoot>/<component>/<prefix type>/game_prefix. The
+        // walk is deliberately depth bounded: a Wine prefix holds tens of thousands
+        // of entries and must never be traversed recursively at startup.
+        const QDir root(configRoot);
+        const auto components = root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        for (const auto& component : components) {
+            const QDir componentDir(component.absoluteFilePath());
+            const auto prefixTypes = componentDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+            for (const auto& prefixType : prefixTypes) {
+                const QDir usersDir(QDir(prefixType.absoluteFilePath()).absoluteFilePath(QStringLiteral("game_prefix/drive_c/users")));
+                const auto users = usersDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+                for (const auto& user : users) {
+                    const QString appData = QDir(user.absoluteFilePath()).absoluteFilePath(QStringLiteral("AppData/Roaming"));
+                    const QDir dir(appData);
+                    if (!dir.exists()) continue;
+                    if (!dir.exists(QString::fromStdString(LevelPathManager::DIR_MINECRAFT_BEDROCK)) &&
+                        !dir.exists(QString::fromStdString(LevelPathManager::DIR_MINECRAFT_BEDROCK_PREVIEW))) {
+                        continue;
+                    }
+                    if (!result.contains(appData)) result.push_back(appData);
+                }
+            }
+        }
+        return result;
+    }
+#endif
+
 }  // namespace
 
 LevelPathInfo LevelPathManager::makeLevelInfo(const QString& dirPath) {
@@ -87,8 +127,10 @@ const std::string LevelPathManager::DIR_MINECRAFT_BEDROCK = "Minecraft Bedrock";
 const std::string LevelPathManager::DIR_MINECRAFT_BEDROCK_PREVIEW = "Minecraft Bedrock Preview";
 
 LevelPathManager::LevelPathManager() {
-    QFileInfo configInfo(constant::CONFIG_FILE_PATH.c_str());
-    filePath_ = configInfo.absoluteDir().absoluteFilePath("cache").toStdString();
+    // Keep the recent-levels cache next to the configuration file so a portable
+    // installation stays self-contained.
+    QFileInfo configInfo(constant::configFilePath());
+    filePath_ = configInfo.absoluteDir().absoluteFilePath("cache.json").toStdString();
     loadHistory();
 }
 
@@ -136,7 +178,57 @@ void LevelPathManager::loadHistory() {
     }
 }
 
+#ifndef _WIN32
+const QStringList& LevelPathManager::linuxWorldRoots() {
+    static const QStringList roots = [] {
+        const QString home = QDir::homePath();
+        QStringList list;
+        const auto add = [&list](const QString& path) {
+            if (path.isEmpty()) return;
+            const QString clean = QDir::cleanPath(path);
+            if (!list.contains(clean)) list.push_back(clean);
+        };
+        const auto addFromEnv = [&add](const char* env, const QString& suffix) {
+            const QString base = qEnvironmentVariable(env);
+            if (!base.isEmpty()) add(base + suffix);
+        };
+        // mcpelauncher (distribution package or a self-built install)
+        addFromEnv("MCPELAUNCHER_DATA_DIR", "/games/com.mojang/minecraftWorlds");
+        addFromEnv("XDG_DATA_HOME", "/mcpelauncher/games/com.mojang/minecraftWorlds");
+        add(home + "/.local/share/mcpelauncher/games/com.mojang/minecraftWorlds");
+        // mcpelauncher Flatpak (io.mrarm.mcpelauncher)
+        add(home + "/.var/app/io.mrarm.mcpelauncher/data/mcpelauncher/games/com.mojang/minecraftWorlds");
+        // Waydroid: world data is inside the Android container either on shared
+        // storage or in the app-private directory.
+        add(home + "/.local/share/waydroid/data/media/0/Android/data/com.mojang.minecraftpe/files/games/com.mojang/minecraftWorlds");
+        add("/var/lib/waydroid/data/media/0/Android/data/com.mojang.minecraftpe/files/games/com.mojang/minecraftWorlds");
+        add("/var/lib/waydroid/data/data/com.mojang.minecraftpe/files/games/com.mojang/minecraftWorlds");
+        return list;
+    }();
+    return roots;
+}
+#endif
+
+QString LevelPathManager::defaultScanPath() {
+#ifdef _WIN32
+    const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
+    if (!localAppData.isEmpty()) {
+        const QString worlds = QDir(localAppData + "/" + QString::fromStdString(PACKAGE_UWP))
+                                   .absoluteFilePath(QString::fromStdString(GAMES_REL_PATH));
+        if (QDir(worlds).exists()) return worlds;
+    }
+    const QString appData = qEnvironmentVariable("APPDATA");
+    if (!appData.isEmpty()) return appData;
+#else
+    for (const auto& root : linuxWorldRoots()) {
+        if (QDir(root).exists()) return root;
+    }
+#endif
+    return QDir::homePath();
+}
+
 void LevelPathManager::init() {
+#ifdef _WIN32
     QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
     QString appData = qEnvironmentVariable("APPDATA");
     if (localAppData.isEmpty() || appData.isEmpty()) return;
@@ -146,9 +238,18 @@ void LevelPathManager::init() {
     if (setting::current().SCAN_LEVI_PATH) {
         initLeviPath();
     }
+#else
+    // Linux: mcpelauncher/Waydroid containers are scanned directly by
+    // scanNormalPaths(), while BedrockBoot uses the desktop layout inside its
+    // Proton prefix, so it is registered as a modern scan path instead.
+    for (const auto& appData : bedrockBootAppDataDirs()) {
+        scan_paths_.push_back({appData.toStdString(), {}, "BedrockBoot", true, false});
+    }
+#endif
 }
 
 void LevelPathManager::initLeviPath() {
+#ifdef _WIN32
     QFile file(QString(qEnvironmentVariable("APPDATA")) + "/LeviLauncher.exe/config.json");
     if (!file.open(QIODevice::ReadOnly)) return;
     auto doc = QJsonDocument::fromJson(file.readAll());
@@ -166,10 +267,12 @@ void LevelPathManager::initLeviPath() {
     for (const auto& ver : versions) {
         scan_paths_.push_back({QDir(baseRoot).absoluteFilePath("versions/" + ver).toStdString(), ver.toStdString(), "Levi", true, false});
     }
+#endif
 }
 
 void LevelPathManager::scanNormalPaths() {
     discovered_levels_.clear();
+#ifdef _WIN32
     QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
     if (localAppData.isEmpty()) return;
 
@@ -178,6 +281,11 @@ void LevelPathManager::scanNormalPaths() {
     scanWorldsInDir(
         QDir(localAppData + "/" + QString::fromStdString(PACKAGE_WINDOWS_BETA)).absoluteFilePath(QString::fromStdString(GAMES_REL_PATH)),
         false, false, discovered_levels_);
+#else
+    for (const auto& root : linuxWorldRoots()) {
+        scanWorldsInDir(root, false, false, discovered_levels_);
+    }
+#endif
 }
 
 void LevelPathManager::scanModernPaths() {

@@ -158,7 +158,8 @@ NbtWidget::NbtWidget(QWidget* parent) : QWidget(parent), ui(new Ui::NbtWidget) {
     ui->splitter->setStretchFactor(0, 1);
     ui->splitter->setStretchFactor(1, 2);
     QFont f;
-    f.setFamilies({"JetBrains Mono", "Microsoft YaHei", "Microsoft YaHei UI"});
+    f.setFamilies({"JetBrains Mono", "Microsoft YaHei", "Microsoft YaHei UI", "Noto Sans CJK SC", "Source Han Sans SC",
+                   "WenQuanYi Micro Hei"});
     ui->list_widget->setFont(f);
     ui->tree_widget->setFont(f);
     ui->tree_widget->setHeaderHidden(true);
