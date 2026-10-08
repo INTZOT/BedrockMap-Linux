@@ -22,6 +22,7 @@
 #include "loguru/loguru.hpp"
 #include "mcstructure.h"
 #include "msg.h"
+#include "opengl_support.h"
 #include "pleasewaitdialog.h"
 #include "voxelwidget.h"
 
@@ -353,7 +354,7 @@ void MapHost::show3DView(int dim) {
     auto rect = view_.selection().region().boundingRect();
     bl::chunk_pos min_pos(rect.x(), rect.y(), dim);
     bl::chunk_pos max_pos(rect.x() + rect.width() - 1, rect.y() + rect.height() - 1, dim);
-    voxel_preview_window_->loadChunksAsync(min_pos, max_pos, *level_loader_);
+    showVoxelPreview(min_pos, max_pos);
 }
 
 bool MapHost::beginPaste(const QByteArray& data, int dim, const bl::chunk_pos& at) {
@@ -370,6 +371,12 @@ bool MapHost::beginImport(const QString& path, int dim, const bl::chunk_pos& at)
 
 void MapHost::showVoxelPreview(const bl::chunk_pos& min, const bl::chunk_pos& max) {
     if (!level_loader_) return;
+    // The voxel view is the only feature that needs an OpenGL context; tell the
+    // user why nothing shows up when this system cannot provide one.
+    if (!opengl_support::available()) {
+        WARN(msg::OPENGL_UNAVAILABLE());
+        return;
+    }
     voxel_preview_window_->loadChunksAsync(min, max, *level_loader_);
 }
 
