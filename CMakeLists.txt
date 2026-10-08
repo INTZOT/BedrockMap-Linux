@@ -56,6 +56,17 @@ if(UNIX)
     endif()
     set_target_properties(bedrock-level PROPERTIES INCLUDE_DIRECTORIES "${_bedrock_level_includes}")
     target_link_libraries(bedrock-level PRIVATE leveldb_mcpe ZLIB::ZLIB)
+
+    # The vendored headers also declare leveldb::LibdeflateCompressor* and
+    # bedrock_level.cpp constructs one; the public leveldb-mcpe has no such file,
+    # so compile the Linux stand-in against these same headers (identical class
+    # layout, no ABI drift) and link libdeflate. LEVELDB_EXPORT is the export
+    # macro of the vendored headers, DLLX the one of the pristine headers; both
+    # are empty for a static build.
+    target_sources(bedrock-level PRIVATE "${PROJECT_SOURCE_DIR}/cmake/leveldb-mcpe/libdeflate_compressor.cc")
+    target_include_directories(bedrock-level PRIVATE "${LIBDEFLATE_INCLUDE_DIR}")
+    target_compile_definitions(bedrock-level PRIVATE LEVELDB_EXPORT=)
+    target_link_libraries(bedrock-level PRIVATE "${LIBDEFLATE_LIBRARY}")
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS 

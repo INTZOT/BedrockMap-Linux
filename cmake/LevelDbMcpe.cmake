@@ -61,3 +61,21 @@ if(NOT WIN32)
     target_compile_definitions(leveldb_mcpe PUBLIC DLLX=)
 endif()
 set(LEVELDB_MCPE_INCLUDE_DIR "${LEVELDB_MCPE_INCLUDE_DIR}" CACHE PATH "leveldb-mcpe headers")
+
+# bedrock-level's vendored headers also declare a libdeflate-backed Compressor
+# (third/leveldb/libdeflate_compressor.h) and src/bedrock_level.cpp constructs
+# leveldb::LibdeflateCompressorRaw. That implementation ships only in the private
+# leveldb-mcpe build behind the prebuilt Windows archives in bedrock-level/libs/,
+# never in the public repository, so the Linux build compiles the stand-in in
+# cmake/leveldb-mcpe/libdeflate_compressor.cc and links libdeflate. The root
+# CMakeLists attaches both to the bedrock-level target (see the UNIX block that
+# puts the pristine headers in front of the vendored ones).
+find_path(LIBDEFLATE_INCLUDE_DIR NAMES libdeflate.h)
+find_library(LIBDEFLATE_LIBRARY NAMES deflate)
+if(NOT LIBDEFLATE_INCLUDE_DIR OR NOT LIBDEFLATE_LIBRARY)
+    message(FATAL_ERROR
+        "libdeflate was not found, but bedrock-level requires the libdeflate-backed "
+        "leveldb Compressor on Linux. Install it (libdeflate on Arch, libdeflate-dev "
+        "on Debian/Ubuntu) or point LIBDEFLATE_INCLUDE_DIR/LIBDEFLATE_LIBRARY at it.")
+endif()
+message(STATUS "libdeflate: ${LIBDEFLATE_LIBRARY}")

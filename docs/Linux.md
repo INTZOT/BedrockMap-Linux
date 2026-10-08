@@ -12,21 +12,22 @@
 | Ninja | 任意 | 可选，未安装时退化为 Make |
 | C++ 编译器 | 支持 C++20 | GCC 16.2 / Clang 22 |
 | zlib | 任意 | leveldb-mcpe 依赖 |
+| libdeflate | 任意（本机验证：1.26） | bedrock-level 的 `LibdeflateCompressorRaw` 需要；见第 5 节说明 |
 | git | 任意 | 拉取子模块与 leveldb-mcpe |
 | Qt LinguistTools | 可选 | 提供 `lupdate` / `lrelease`；缺失时见下文回退方案 |
 
 Arch / CachyOS：
 
 ```bash
-sudo pacman -S --needed base-devel cmake ninja git zlib \
+sudo pacman -S --needed base-devel cmake ninja git zlib libdeflate \
     qt6-base qt6-svg qt6-tools
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install build-essential cmake ninja-build git zlib1g-dev libgl1-mesa-dev \
-    qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools
+sudo apt install build-essential cmake ninja-build git zlib1g-dev libdeflate-dev \
+    libgl1-mesa-dev qt6-base-dev qt6-svg-dev qt6-tools-dev qt6-tools-dev-tools
 ```
 
 ### 1.1 免 root 工具链（本机采用）
@@ -150,6 +151,7 @@ BedrockMap /path/to/world     # 直接打开某个世界目录（含 level.dat �
 | `src/chunkeditorwidget.cpp` 等 4 处 | 等宽字体回退列表补充 Noto Sans CJK / 文泉驿 |
 | `CMakeLists.txt` | LinguistTools 变为可选并提供 lrelease 回退；`icon.rc` 仅 Windows；集成 leveldb-mcpe；Linux 链接 `-rdynamic`；新增 `install()` 规则与 `desktop`/图标安装 |
 | `cmake/LevelDbMcpe.cmake`、`cmake/patches/leveldb-mcpe-linux.patch` | 新增：定位/下载并以静态库方式构建 leveldb-mcpe |
+| `cmake/leveldb-mcpe/libdeflate_compressor.cc` | 新增：补齐 `LibdeflateCompressorBase` 的两个虚函数。bedrock-level 子模块自 c217665 起引入 `leveldb::LibdeflateCompressorRaw`，其实现只随该子模块私有的 leveldb-mcpe 构建（即 `bedrock-level/libs/` 里的 Windows 静态库）发布，公开的 Amulet-Team 仓库没有该文件；此文件以相同头文件环境编译，链接系统 libdeflate |
 | `scripts/build.sh`、`run.sh`、`install.sh`、`deploy.sh` | 新增：Linux 构建/运行/安装/打包脚本 |
 | `packaging/BedrockMap.desktop` | 新增：桌面入口 |
 
@@ -163,6 +165,8 @@ BedrockMap /path/to/world     # 直接打开某个世界目录（含 level.dat �
 | 地图没有颜色 | `block_color.json` / `biome_color.json` 缺失，用 `BEDROCKMAP_DATA_DIR` 指向存放目录 |
 | 崩溃 | 查看 `~/.local/state/BedrockMap/logs/crash_*.log`（Release 构建同样可用，链接时已加 `-rdynamic`） |
 | configure 阶段提示 `Current compiler is GUN gcc, not support yet` | 这是 bedrock-level 子模块里的旧提示；本项目的 `cmake/LevelDbMcpe.cmake` 已自动处理该依赖 |
+| configure 阶段报 `libdeflate was not found` | 安装系统 libdeflate（Arch：`libdeflate`；Debian/Ubuntu：`libdeflate-dev`），或用 `-DLIBDEFLATE_INCLUDE_DIR=`/`-DLIBDEFLATE_LIBRARY=` 指定 |
+| 链接报 `undefined reference to leveldb::LibdeflateCompressorBase::compressImpl` | `cmake/leveldb-mcpe/libdeflate_compressor.cc` 未参与编译：确认根 `CMakeLists.txt` 的 UNIX 分支里 `target_sources(bedrock-level ...)` 仍在，并重新 configure |
 
 ## 9. 调试
 
