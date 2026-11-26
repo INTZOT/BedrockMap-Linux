@@ -142,6 +142,54 @@ namespace {
         }
     }
 
+    void appendLinuxWorldSources(std::vector<WorldSource>& sources) {
+        const QString home = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+        if (home.isEmpty()) return;
+        const QString games = QStringLiteral("games/com.mojang/minecraftWorlds");
+        const QDir homeDir(home);
+
+        QSet<QString> seen;
+        const auto append = [&](const QString& path, WorldSourceKind kind) {
+            const QString normalized = platform::normalizeLocalPath(path);
+            if (normalized.isEmpty() || seen.contains(normalized)) return;
+            seen.insert(normalized);
+            sources.push_back({.path = normalized, .kind = kind});
+        };
+
+        // Native mcpelauncher install; the launcher also honours a data dir override.
+        QString launcherData = qEnvironmentVariable("MCPELAUNCHER_DATA_DIR");
+        if (launcherData.isEmpty()) launcherData = homeDir.filePath(QStringLiteral(".local/share/mcpelauncher"));
+        append(QDir(launcherData).filePath(games), WorldSourceKind::McpeLauncher);
+
+        // Flatpak build of the same launcher.
+        append(homeDir.filePath(QStringLiteral(".var/app/io.mrarm.mcpelauncher/data/mcpelauncher/") + games),
+               WorldSourceKind::McpeLauncher);
+
+        // Waydroid exposes the shared storage and the application private data.
+        append(homeDir.filePath(QStringLiteral(".local/share/waydroid/data/media/0/Android/data/com.mojang.minecraftpe/files/") + games),
+               WorldSourceKind::Waydroid);
+        append(QStringLiteral("/var/lib/waydroid/data/data/com.mojang.minecraftpe/files/") + games, WorldSourceKind::Waydroid);
+
+        // BedrockBoot runs the Windows build through Proton, so every instance keeps
+        // a prefix with the usual per-edition, per-account profile layout.
+        const QString bootRoot = homeDir.filePath(QStringLiteral(".config/RoundStudio/BedrockBoot2"));
+        for (const auto& profile : childDirectories(bootRoot)) {
+            for (const auto& instance : childDirectories(profile)) {
+                const QString users = QDir(instance).filePath(QStringLiteral("game_prefix/drive_c/users"));
+                for (const auto& user : childDirectories(users)) {
+                    const QString roaming = QDir(user).filePath(QStringLiteral("AppData/Roaming"));
+                    for (bool preview : {false, true}) {
+                        const QString product =
+                            preview ? QStringLiteral("Minecraft Bedrock Preview") : QStringLiteral("Minecraft Bedrock");
+                        for (const auto& account : childDirectories(QDir(roaming).filePath(product + QStringLiteral("/Users")))) {
+                            append(QDir(account).filePath(games), WorldSourceKind::BedrockBoot);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     void appendAndroidWorldSources(std::vector<WorldSource>& sources) {
         sources.push_back({.path = QStringLiteral("/data/user/0/com.mojang.minecraftpe/games/com.mojang/minecraftWorlds"),
                            .kind = WorldSourceKind::AndroidLegacy});
@@ -166,6 +214,7 @@ std::vector<WorldSource> makeWorldSources(const QStringList& customPaths, bool s
     appendAndroidWorldSources(sources);
 #else
     Q_UNUSED(scanLeviPath);
+    appendLinuxWorldSources(sources);
 #endif
 
     QSet<QString> seen;
@@ -221,6 +270,12 @@ QString worldSourceLabel(WorldSourceKind kind) {
             return QString::fromUtf8(QT_TRANSLATE_NOOP("WorldSource", "Release internal"));
         case WorldSourceKind::AndroidReleaseExternal:
             return QString::fromUtf8(QT_TRANSLATE_NOOP("WorldSource", "Release external"));
+        case WorldSourceKind::McpeLauncher:
+            return QString::fromUtf8(QT_TRANSLATE_NOOP("WorldSource", "mcpelauncher"));
+        case WorldSourceKind::Waydroid:
+            return QString::fromUtf8(QT_TRANSLATE_NOOP("WorldSource", "Waydroid"));
+        case WorldSourceKind::BedrockBoot:
+            return QString::fromUtf8(QT_TRANSLATE_NOOP("WorldSource", "BedrockBoot"));
         case WorldSourceKind::AppInternal:
             return QString::fromUtf8(QT_TRANSLATE_NOOP("WorldSource", "App internal"));
         case WorldSourceKind::External:

@@ -15,6 +15,9 @@ enum class WorldSourceKind {
     AndroidLegacy,
     AndroidReleaseInternal,
     AndroidReleaseExternal,
+    McpeLauncher,
+    Waydroid,
+    BedrockBoot,
     AppInternal,
     External,
 };

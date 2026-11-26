@@ -101,3 +101,8 @@ docs/*
 !docs/voxelStructureIO.md
 dist
 AGENTS.md
+
+# Linux port: local dependency cache (leveldb-mcpe checkout) and the
+# user-facing Linux guide, which docs/* would otherwise ignore.
+/third/
+!docs/Linux.md

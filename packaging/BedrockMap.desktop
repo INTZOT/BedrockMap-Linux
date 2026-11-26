@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=BedrockMap
+GenericName=Minecraft Bedrock World Editor
+GenericName[zh_CN]=Minecraft 基岩版地图编辑器
+Comment=View and edit Minecraft Bedrock Edition worlds
+Comment[zh_CN]=查看与编辑《我的世界》基岩版存档
+Exec=BedrockMap %F
+TryExec=BedrockMap
+Icon=BedrockMap
+Terminal=false
+Categories=Game;
+Keywords=minecraft;bedrock;world;map;nbt;leveldb;
+Keywords[zh_CN]=我的世界;基岩版;存档;地图;NBT;
+StartupNotify=true
+StartupWMClass=BedrockMap
