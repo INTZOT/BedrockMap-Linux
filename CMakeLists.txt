@@ -44,8 +44,11 @@ find_package(Qt6 REQUIRED COMPONENTS
     ShaderTools
     Svg
     Network
-    LinguistTools
 )
+# LinguistTools lives in a separate distribution package (qt6-tools on Arch,
+# qttools6-dev-tools on Debian). When it is missing the catalogues are compiled
+# with any lrelease that can be found (including the PySide6 one) or skipped.
+find_package(Qt6 QUIET COMPONENTS LinguistTools)
 
 qt_policy(SET QTP0001 NEW)
 qt_policy(SET QTP0004 NEW)
@@ -55,7 +58,17 @@ qt_policy(SET QTP0004 NEW)
 set(BEDROCK_LEVEL_ROOT "${PROJECT_SOURCE_DIR}/bedrock-level")
 set(BEDROCK_LEVEL_BUILD_TESTS OFF CACHE BOOL "Disable bedrock-level tests in the GUI build" FORCE)
 set(BEDROCK_LEVEL_BUILD_BENCHMARKS ON CACHE BOOL "Build bedrock-level benchmarks" FORCE)
-add_subdirectory(${BEDROCK_LEVEL_ROOT} bedrock-level)
+if(WIN32 OR ANDROID OR EMSCRIPTEN)
+    # The submodule's own build only supports the platforms it ships prebuilt
+    # leveldb-mcpe archives for.
+    add_subdirectory(${BEDROCK_LEVEL_ROOT} bedrock-level)
+else()
+    # Linux: the submodule has no archives for this platform, so leveldb-mcpe
+    # and libdeflate are built from source and the library target is defined by
+    # the modules below.
+    include(${PROJECT_SOURCE_DIR}/cmake/LevelDbMcpe.cmake)
+    include(${PROJECT_SOURCE_DIR}/cmake/BedrockLevelLinux.cmake)
+endif()
 
 # Shared resources and version metadata
 set(APP_ICON_RESOURCE_WINDOWS "${PROJECT_SOURCE_DIR}/icon.rc")
@@ -212,11 +225,21 @@ set_source_files_properties(
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE
 )
 
+# Windows names the executable BedrockMap.exe, so the module can live in a
+# BedrockMap/ directory next to it. A Linux executable has no extension and the
+# linker would fail with "cannot open output file BedrockMap: Is a directory",
+# so the module goes one level down there.
+if(WIN32)
+    set(BEDROCKMAP_QML_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/BedrockMap")
+else()
+    set(BEDROCKMAP_QML_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/qml/BedrockMap")
+endif()
+
 qt_add_qml_module(BedrockMap
     URI BedrockMap
     VERSION 1.0
     RESOURCE_PREFIX "/qt/qml"
-    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/BedrockMap"
+    OUTPUT_DIRECTORY "${BEDROCKMAP_QML_OUTPUT_DIRECTORY}"
     QML_FILES ${QML_SOURCE_FILES}
     SOURCES ${BEDROCKMAP_QML_SOURCES}
 )
@@ -275,17 +298,70 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/benchmark)
 
 # Shared translations
 # The application embeds the catalogs; the core is scanned for its tr() strings.
-qt6_add_translations(TARGETS BedrockMap
-    SOURCE_TARGETS BedrockMap BedrockMapCore
-    TS_FILES ${TS_FILES}
-    RESOURCE_PREFIX "${BEDROCKMAP_RESOURCE_PREFIX}/i18n"
-)
+if(TARGET Qt6::lrelease)
+    qt6_add_translations(TARGETS BedrockMap
+        SOURCE_TARGETS BedrockMap BedrockMapCore
+        TS_FILES ${TS_FILES}
+        RESOURCE_PREFIX "${BEDROCKMAP_RESOURCE_PREFIX}/i18n"
+    )
+else()
+    find_program(BEDROCKMAP_LRELEASE_EXECUTABLE
+        NAMES lrelease lrelease6 lrelease-qt6 pyside6-lrelease
+        HINTS "$ENV{HOME}/.local/venvs/bedrockmap/bin")
+    if(BEDROCKMAP_LRELEASE_EXECUTABLE)
+        message(STATUS "Qt LinguistTools not found; compiling translations with ${BEDROCKMAP_LRELEASE_EXECUTABLE}")
+        set(BEDROCKMAP_QM_FILES)
+        foreach(ts_file IN LISTS TS_FILES)
+            get_filename_component(ts_language "${ts_file}" NAME_WE)
+            set(ts_qm "${CMAKE_CURRENT_BINARY_DIR}/${ts_language}.qm")
+            add_custom_command(
+                OUTPUT "${ts_qm}"
+                COMMAND "${BEDROCKMAP_LRELEASE_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/${ts_file}" -qm "${ts_qm}"
+                DEPENDS "${PROJECT_SOURCE_DIR}/${ts_file}"
+                COMMENT "Compiling translation ${ts_language}.qm"
+                VERBATIM)
+            list(APPEND BEDROCKMAP_QM_FILES "${ts_qm}")
+        endforeach()
+        qt_add_resources(BedrockMap translation_catalogs
+            PREFIX "${BEDROCKMAP_RESOURCE_PREFIX}/i18n"
+            BASE "${CMAKE_CURRENT_BINARY_DIR}"
+            FILES ${BEDROCKMAP_QM_FILES}
+        )
+    else()
+        message(WARNING
+            "Qt LinguistTools, lrelease and pyside6-lrelease were all not found: the "
+            "application will run with the untranslated (English) interface. Install "
+            "qt6-tools (Arch) or qttools6-dev-tools (Debian) to enable translations.")
+    endif()
+endif()
 
 # QML runtime setup
-# QRhi's public headers are versioned below the QtGui include directory.
-target_include_directories(BedrockMap PRIVATE
-    "${Qt6Gui_DIR}/../../../include/QtGui/${Qt6Gui_VERSION}/QtGui"
-)
+# QRhi's public headers are versioned below the QtGui include directory. Qt
+# installs them under <prefix>/include/QtGui/<version>/QtGui on Windows but
+# under <prefix>/include/qt6/QtGui/<version>/QtGui on Linux, so ask qmake
+# instead of guessing the layout.
+set(BEDROCKMAP_QTGUI_RHI_INCLUDE "")
+if(TARGET Qt6::qmake)
+    get_target_property(_bedrockmap_qmake Qt6::qmake IMPORTED_LOCATION)
+    execute_process(
+        COMMAND "${_bedrockmap_qmake}" -query QT_INSTALL_HEADERS
+        OUTPUT_VARIABLE _bedrockmap_qt_headers
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    if(_bedrockmap_qt_headers)
+        set(BEDROCKMAP_QTGUI_RHI_INCLUDE "${_bedrockmap_qt_headers}/QtGui/${Qt6Gui_VERSION}/QtGui")
+    endif()
+endif()
+if(NOT EXISTS "${BEDROCKMAP_QTGUI_RHI_INCLUDE}/rhi/qrhi.h")
+    find_path(BEDROCKMAP_QTGUI_RHI_INCLUDE
+        NAMES rhi/qrhi.h
+        PATHS "${Qt6Gui_DIR}/../../../include" "${Qt6Gui_DIR}/../../../include/qt6"
+        PATH_SUFFIXES "QtGui/${Qt6Gui_VERSION}/QtGui")
+endif()
+if(NOT EXISTS "${BEDROCKMAP_QTGUI_RHI_INCLUDE}/rhi/qrhi.h")
+    message(FATAL_ERROR "Cannot locate QtGui's RHI headers (rhi/qrhi.h) for Qt ${Qt6Gui_VERSION}.")
+endif()
+target_include_directories(BedrockMap PRIVATE "${BEDROCKMAP_QTGUI_RHI_INCLUDE}")
 
 # qsb invokes fxc for PRECOMPILE on Windows. Keep the SDK tool visible even
 # when the project is built from a plain PowerShell/IDE session.
@@ -367,7 +443,10 @@ endif()
 # launched outside Qt Creator.
 get_filename_component(QT_BUILD_ROOT "${Qt6_DIR}/../../.." ABSOLUTE)
 set(QT_QML_IMPORT_ROOT "${QT_BUILD_ROOT}/qml")
-if(NOT ANDROID AND NOT EMSCRIPTEN)
+# A distribution Qt already advertises its own import path, and the guess below
+# only matches Qt build trees laid out like the Windows ones, so copy when it
+# resolves and skip otherwise instead of failing the build.
+if(NOT ANDROID AND NOT EMSCRIPTEN AND EXISTS "${QT_QML_IMPORT_ROOT}/QtQml")
     add_custom_command(TARGET BedrockMap POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${QT_QML_IMPORT_ROOT}/QtQml"
@@ -377,6 +456,8 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
                 "$<TARGET_FILE_DIR:BedrockMap>/qml/QtQuick"
         VERBATIM
     )
+elseif(NOT ANDROID AND NOT EMSCRIPTEN)
+    message(STATUS "QML import root not found at ${QT_QML_IMPORT_ROOT}; using the installed Qt QML modules")
 endif()
 
 # Platform: Android
@@ -423,4 +504,17 @@ endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
     target_compile_definitions(BedrockMapCore PRIVATE QT_NO_DEBUG_OUTPUT)
     target_compile_definitions(BedrockMap PRIVATE QT_NO_DEBUG_OUTPUT)
+endif()
+
+# Platform: Linux
+# Windows and Android are packaged by the scripts; Linux installs a regular
+# binary with a desktop entry and a scalable icon.
+if(UNIX AND NOT APPLE)
+    include(GNUInstallDirs)
+    install(TARGETS BedrockMap RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    install(FILES "${PROJECT_SOURCE_DIR}/packaging/BedrockMap.desktop"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+    install(FILES "${PROJECT_SOURCE_DIR}/BedrockMap.svg"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+        RENAME BedrockMap.svg)
 endif()

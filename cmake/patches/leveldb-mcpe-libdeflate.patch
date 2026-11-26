@@ -1,0 +1,143 @@
+--- a/include/leveldb/zlib_compressor.h
++++ b/include/leveldb/zlib_compressor.h
+@@ -12,7 +12,15 @@
+ 
+ 		const int compressionLevel;
+ 		const bool raw;
+-        
++
++		// Run compression and decompression through libdeflate instead of zlib.
++		// Both libraries read and write the same deflate/zlib streams, so this
++		// only picks who does the work: the block format, the serializer ids and
++		// the on-disk data are the same either way. Set it to false to force the
++		// zlib path. Ignored when the build has no libdeflate, in which case zlib
++		// is always used. Intended to be set before the database is opened.
++		bool useLibdeflate = true;
++
+         virtual ~ZlibCompressorBase() {
+             
+         }
+--- a/db/zlib_compressor.cc
++++ b/db/zlib_compressor.cc
+@@ -4,11 +4,111 @@
+ 
+ #include <zlib.h>
+ #include <algorithm>
++#include <vector>
++
++#ifdef LEVELDB_HAVE_LIBDEFLATE
++#include <libdeflate.h>
++#endif
+ 
+ namespace leveldb {
+ 
++#ifdef LEVELDB_HAVE_LIBDEFLATE
++	namespace {
++		// libdeflate keeps its match-finder tables inside the compressor object, so
++		// cache one per (raw, level) per thread instead of rebuilding it for every
++		// block. The destructor releases them when the thread exits.
++		struct libdeflate_compressor_cache {
++			struct entry {
++				bool raw;
++				int level;
++				libdeflate_compressor* compressor;
++			};
++
++			~libdeflate_compressor_cache() {
++				for (auto& item : entries) libdeflate_free_compressor(item.compressor);
++			}
++
++			libdeflate_compressor* get(bool raw, int level) {
++				for (auto& item : entries) {
++					if (item.raw == raw && item.level == level) return item.compressor;
++				}
++				libdeflate_compressor* compressor = libdeflate_alloc_compressor(level);
++				entries.push_back({raw, level, compressor});
++				return compressor;
++			}
++
++			std::vector<entry> entries;
++		};
++
++		libdeflate_compressor* compressorFor(bool raw, int level) {
++			static thread_local libdeflate_compressor_cache cache;
++			return cache.get(raw, level);
++		}
++
++		// A decompressor keeps no state that has to be reset between streams.
++		struct libdeflate_decompressor_holder {
++			libdeflate_decompressor_holder() : decompressor(libdeflate_alloc_decompressor()) {}
++			~libdeflate_decompressor_holder() { libdeflate_free_decompressor(decompressor); }
++			libdeflate_decompressor* decompressor;
++		};
++
++		libdeflate_decompressor* decompressorForThread() {
++			static thread_local libdeflate_decompressor_holder holder;
++			return holder.decompressor;
++		}
++
++		// Appends to output, matching the streaming zlib implementation below.
++		int libdeflateCompress(bool raw, int level, const char* input, size_t length, std::string& output) {
++			libdeflate_compressor* compressor = compressorFor(raw, level);
++			if (compressor == nullptr) return Z_MEM_ERROR;
++			const size_t bound = raw ? libdeflate_deflate_compress_bound(compressor, length)
++			                         : libdeflate_zlib_compress_bound(compressor, length);
++			const size_t offset = output.size();
++			output.resize(offset + bound);
++			const size_t written = raw
++				? libdeflate_deflate_compress(compressor, input, length, output.data() + offset, bound)
++				: libdeflate_zlib_compress(compressor, input, length, output.data() + offset, bound);
++			if (written == 0) {
++				output.resize(offset);
++				return Z_BUF_ERROR;
++			}
++			output.resize(offset + written);
++			return Z_OK;
++		}
++
++		int libdeflateInflate(bool raw, const char* input, size_t length, std::string& output) {
++			libdeflate_decompressor* decompressor = decompressorForThread();
++			if (decompressor == nullptr) return Z_MEM_ERROR;
++			// libdeflate decompresses in one shot and LevelDB does not record the
++			// uncompressed size, so start from a guess and grow until it fits.
++			const size_t offset = output.size();
++			size_t capacity = std::max<size_t>(length * 4u, 64u * 1024u);
++			for (;;) {
++				output.resize(offset + capacity);
++				size_t actual_in = 0;
++				size_t actual_out = 0;
++				const libdeflate_result result =
++					raw ? libdeflate_deflate_decompress_ex(decompressor, input, length, output.data() + offset, capacity,
++					                                       &actual_in, &actual_out)
++					    : libdeflate_zlib_decompress_ex(decompressor, input, length, output.data() + offset, capacity,
++					                                    &actual_in, &actual_out);
++				if (result == LIBDEFLATE_SUCCESS) {
++					output.resize(offset + actual_out);
++					return Z_OK;
++				}
++				output.resize(offset);
++				if (result != LIBDEFLATE_INSUFFICIENT_SPACE) return Z_DATA_ERROR;
++				capacity *= 2u;
++			}
++		}
++	}  // namespace
++#endif
++
+ 	void ZlibCompressorBase::compressImpl(const char* input, size_t length, ::std::string& buffer) const
+ 	{
++#ifdef LEVELDB_HAVE_LIBDEFLATE
++		if (useLibdeflate && libdeflateCompress(raw, compressionLevel, input, length, buffer) == Z_OK) return;
++#endif
+ 		const size_t BUFSIZE = 128 * 1024;
+ 		unsigned char temp_buffer[BUFSIZE];
+ 
+@@ -110,6 +210,9 @@
+ 	}
+ 
+ 	bool ZlibCompressorBase::decompress(const char* input, size_t length, ::std::string &output) const {
++#ifdef LEVELDB_HAVE_LIBDEFLATE
++		if (useLibdeflate) return libdeflateInflate(raw, input, length, output) == Z_OK;
++#endif
+ 		return inflate(input, length, output) == Z_OK;
+ 	}
+ 		
